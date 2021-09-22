@@ -14,5 +14,19 @@ contextBridge.exposeInMainWorld("api", {
   i18nextElectronBackend: i18nextBackend.preloadBindings(ipcRenderer),
   store: store.preloadBindings(ipcRenderer, fs),
   contextMenu: ContextMenu.preloadBindings(ipcRenderer),
-  licenseKeys: SecureElectronLicenseKeys.preloadBindings(ipcRenderer)
+  licenseKeys: SecureElectronLicenseKeys.preloadBindings(ipcRenderer),
+  send: async (channel, data) => {
+    // whitelist channels here
+    let validChannels = ["filePath"];
+    if (validChannels.includes(channel)) {
+      return await ipcRenderer.invoke(channel, data);
+    }
+  },
+  receive: (channel, func) => {
+    //whitelist channels here
+    let validChannels = ["imageSegmentations"];
+    if (validChannels.includes(channel)) {
+      resolve(ipcRenderer.on(channel, (event, ...args) => func(...args)));
+    }
+  }
 });

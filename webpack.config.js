@@ -24,7 +24,7 @@ module.exports = {
     rules: [{
         // loads .html files
         test: /\.(html)$/,
-        include: [path.resolve(__dirname, "app/src")],
+        // include: [path.resolve(__dirname, "app/src")],
         use: {
           loader: "html-loader",
           options: {

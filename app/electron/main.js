@@ -2,6 +2,7 @@ const {
   app,
   protocol,
   BrowserWindow,
+  screen,
   session,
   ipcMain,
   Menu
@@ -21,6 +22,7 @@ const ContextMenu = require("secure-electron-context-menu").default;
 const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
+const { error } = require("console");
 const isDev = process.env.NODE_ENV === "development";
 const port = 40992; // Hardcoded; needs to match webpack.development.js and package.json
 const selfHost = `http://localhost:${port}`;
@@ -51,13 +53,15 @@ async function createWindow() {
   // BrowserWindow, for instance.
   // NOTE - this config is not passcode protected
   // and stores plaintext values
-  //let savedConfig = store.mainInitialStore(fs);
+  // let savedConfig = store.mainInitialStore(fs);
 
+  const { width, height } = screen.getPrimaryDisplay().workAreaSize
   // Create the browser window.
   win = new BrowserWindow({
-    width: 800,
-    height: 600,
+    width: Math.min(Math.floor(width * 0.85), 1920),
+    height: Math.min(Math.floor(height * 0.85), 1080),
     title: "Application is currently initializing...",
+    titleBarStyle: 'hiddenInset',
     webPreferences: {
       devTools: isDev,
       nodeIntegration: false,
@@ -68,7 +72,10 @@ async function createWindow() {
       additionalArguments: [`storePath:${app.getPath("userData")}`],
       preload: path.join(__dirname, "preload.js"),
       /* eng-disable PRELOAD_JS_CHECK */
-      disableBlinkFeatures: "Auxclick"
+      disableBlinkFeatures: "Auxclick",
+      // added below line cause files will be served locally and not over http 
+      // DELETE IN PRODUCTION
+      webSecurity: false
     }
   });
 
@@ -124,7 +131,7 @@ async function createWindow() {
         .catch((err) => console.log("An error occurred: ", err))
         .finally(() => {
           require("electron-debug")(); // https://github.com/sindresorhus/electron-debug
-          win.webContents.openDevTools();
+          win.webContents.openDevTools({ mode: 'detach' });
         });
     });
   }
@@ -196,6 +203,59 @@ protocol.registerSchemesAsPrivileged([{
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
 app.on("ready", createWindow);
+
+// IPC functions
+ipcMain.handle('filePath', async (event, args) => {
+  console.log(`Received ${args} from renderer process`);
+  var file_names = []
+  args.map((filePath) => {
+    fs.copyFile(filePath, path.join(__dirname, `../temp/uploadedImages/${path.basename(filePath)}`), (error) => {
+      if(error) {
+        console.log(error);
+      }
+    })
+    file_names.push(path.basename(filePath));
+  });
+
+  try {
+    await segmentUploadedImages();
+    return {'temp_path': path.join(__dirname, `../temp/`), 'file_names': file_names};
+  } catch(error) {
+    return 1;
+  }
+});
+
+// Python functions
+function segmentUploadedImages() {
+  return new Promise((resolve, reject) => {
+    var python = require("child_process").spawn("python", [
+      `${path.join(__dirname, '../python/segmentation_code/detect_segment.py')}`
+    ]);
+    console.log(`python process started: ${python}`);
+  
+    python.stdout.on("data", (data) => {
+      // Do some process here
+      console.log(data);
+    });
+  
+    python.stderr.on("data", (data) => {
+      console.error(`stderr: ${data}`);
+    });
+  
+    python.on("close", (code) => {
+      console.log(`child process exited with code ${code}`);
+      if (code != 0) {
+        throw new Error('python error');
+      }
+      resolve();
+    });
+  })
+}
+
+// Function to convert an Uint8Array to a string
+var uint8arrayToString = function(data){
+  return String.fromCharCode.apply(null, data);
+};
 
 // Quit when all windows are closed.
 app.on("window-all-closed", () => {
