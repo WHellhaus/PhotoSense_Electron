@@ -32,6 +32,9 @@ const selfHost = `http://localhost:${port}`;
 let win;
 let menuBuilder;
 
+// Keep global reference to python process for face segmentation as this will be constantly running
+let segmentationProcess;
+
 async function createWindow() {
 
   // If you'd like to set up auto-updating for your app,
@@ -116,8 +119,18 @@ async function createWindow() {
     win.loadURL(`${Protocol.scheme}://rse/index.html`);
   }
 
-  win.webContents.on("did-finish-load", () => {
+  win.webContents.on("did-finish-load", async() => {
     win.setTitle(`Getting started with secure-electron-template (v${app.getVersion()})`);
+
+    // clear temp directories
+    await clearDirectory(path.join(__dirname, '../temp/uploadedImages/'));
+    await clearDirectory(path.join(__dirname, '../temp/maskImages/'));
+    await clearDirectory(path.join(__dirname, '../temp/censoredImages/'));
+
+    // startup segmentation process after windows has loaded
+    // this process will be run throughout the duration of the apps life
+    segmentationProcess =  await StartSegProcess();
+    //console.log(segmentationProcess);
   });
 
   // Only do these things when in development
@@ -207,7 +220,8 @@ app.on("ready", createWindow);
 // IPC functions
 ipcMain.handle('filePath', async (event, args) => {
   console.log(`Received ${args} from renderer process`);
-  var file_names = []
+  var file_names = [];
+  var image_mask_promises = [];
   args.map((filePath) => {
     fs.copyFile(filePath, path.join(__dirname, `../temp/uploadedImages/${path.basename(filePath)}`), (error) => {
       if(error) {
@@ -215,41 +229,89 @@ ipcMain.handle('filePath', async (event, args) => {
       }
     })
     file_names.push(path.basename(filePath));
+    image_mask_promises.push(checkExistsWithTimeout(path.join(__dirname, `../temp/maskImages/${path.basename(filePath)}`), 10000))
   });
 
-  try {
-    await segmentUploadedImages();
-    return {'temp_path': path.join(__dirname, `../temp/`), 'file_names': file_names};
-  } catch(error) {
-    return 1;
-  }
+  var segmented_files = [];
+  return Promise.allSettled(image_mask_promises).then((results) => {
+    var numRejected = 0;
+    results.forEach((elem, index) => {
+      if (elem.status === "fulfilled") {
+        segmented_files.push(file_names[index]);
+      } else {
+        numRejected++;
+      }
+    });
+
+    if (numRejected === file_names.length) {
+      // error code is 1
+      return 1;
+    } else {
+      return {'temp_path': path.join(__dirname, `../temp/`), 'file_names': segmented_files};
+    }
+  });
 });
 
-// Python functions
-function segmentUploadedImages() {
+// Check that uploaded image has been segmented
+// This works by getting a filepath and checking if the file is created within a certain time period
+function checkExistsWithTimeout(filePath, timeout) {
+    return new Promise(function (resolve, reject) {
+        var timer = setTimeout(function () {
+            watcher.close();
+            reject(new Error('File did not exists and was not created during the timeout.'));
+        }, timeout);
+
+        fs.access(filePath, fs.constants.R_OK, function (err) {
+            if (!err) {
+                clearTimeout(timer);
+                watcher.close();
+                resolve();
+            }
+        });
+
+        var dir = path.dirname(filePath);
+        var basename = path.basename(filePath);
+        var watcher = fs.watch(dir, function (eventType, filename) {
+            if (eventType === 'rename' && filename === basename) {
+                clearTimeout(timer);
+                watcher.close();
+                resolve();
+            }
+        });
+    });
+}
+
+// Startup segmentation process
+function StartSegProcess() {
   return new Promise((resolve, reject) => {
     var python = require("child_process").spawn("python", [
       `${path.join(__dirname, '../python/segmentation_code/detect_segment.py')}`
     ]);
+
     console.log(`python process started: ${python}`);
-  
-    python.stdout.on("data", (data) => {
-      // Do some process here
-      console.log(data);
-    });
-  
-    python.stderr.on("data", (data) => {
-      console.error(`stderr: ${data}`);
-    });
-  
-    python.on("close", (code) => {
-      console.log(`child process exited with code ${code}`);
-      if (code != 0) {
-        throw new Error('python error');
+    resolve(python);
+  });
+}
+
+// Delete files from directory
+function clearDirectory(directory) {
+  return new Promise((resolve, reject) => {
+    fs.readdir(directory, (err, files) => {
+      if (err) {
+        console.log('error:',err)
+        reject(err)
+      }
+      
+      for (const file of files) {
+        fs.unlink(path.join(directory, file), err => {
+          if (err) {
+            reject(err)
+          }
+        });
       }
       resolve();
     });
-  })
+  });
 }
 
 // Function to convert an Uint8Array to a string

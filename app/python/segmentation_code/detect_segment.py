@@ -2,6 +2,7 @@ import os
 import sys
 import math
 import pathlib
+import uuid
 
 import cv2
 import numpy as np
@@ -26,6 +27,8 @@ IMG_HEIGHT = 128 # for faster computing
 IMG_CHANNELS = 3
 args = {'prototxt': 'deploy.prototxt.txt', 'model': 'res10_300x300_ssd_iter_140000.caffemodel', 'confidence': 0.7}
 filePath = pathlib.Path(__file__).resolve()
+
+segmentedImages = set() # holds all images that have already been segmented by model
 
 def conv2d_block(input_tensor, n_filters, kernel_size = 3, batchnorm = True):
     """Function to add 2 convolutional layers with the parameters passed to it"""
@@ -105,60 +108,80 @@ def load_models():
     return model, net
 
 def main():
-    imageFolderPath = os.path.join(filePath, '..', '..', '..', 'temp', 'uploadedImages')
-    file_names = [os.path.abspath(os.path.join(imageFolderPath, f)) for f in os.listdir(os.path.abspath(imageFolderPath)) if f.endswith(('.jpeg', '.jpg', '.png'))]
-
-    images = []
-    for file in file_names:
-        image = Image.open(file)
-        # if the image mode is not RGB, convert it
-        if image.mode != "RGB":
-            image = image.convert("RGB")
-        image = img_to_array(image)
-        image = np.expand_dims(image, axis=0)
-        # print(image.shape)
-        images.append(image)
-
-    if (len(images) > 0):
+    while True:
         model, net = load_models()
+        
+        imageFolderPath = os.path.join(filePath, '..', '..', '..', 'temp', 'uploadedImages')
+        file_names = [os.path.abspath(os.path.join(imageFolderPath, f)) for f in os.listdir(os.path.abspath(imageFolderPath)) if f.endswith(('.jpeg', '.jpg', '.png'))]
 
-        faces = {}
-        for i in range(len(images)):
-            image = images[i][0]
-            (h,w) = image.shape[:2]
-            if h > 2000 or w > 2000:
-                blob = cv2.dnn.blobFromImage(image, mean=(104.0, 117.0, 123.0), swapRB=True)
-                args['confidence'] = 0.7
-            else:
-                blob = cv2.dnn.blobFromImage(cv2.resize(image, (300, 300)), 1.0, (300, 300), (104.0, 117.0, 123.0), True)
-                args['confidence'] = 0.7
-            net.setInput(blob)
-            detections = net.forward()
+        file_names = list(set(file_names) - segmentedImages)
+        segmentedImages.update(file_names)
 
-            if detections.shape[2] == 0:
-                faces[i] = np.array([[[[0., 1., 1., 0., 0., 1., 1.]]]])
-            else:
-                faces[i] = detections
+        images = []
+        for file in file_names:
+            image = Image.open(file)
+            # if the image mode is not RGB, convert it
+            if image.mode != "RGB":
+                image = image.convert("RGB")
+            image = img_to_array(image)
+            image = np.expand_dims(image, axis=0)
+            images.append(image)
 
-        X = []# cropped portion of image from faces list
-        X_positions = []# position of crop so it can be reinserted in correct position
-        numFaces = []# number of crops made in each photo
+        if (len(images) > 0):
 
-        for imageNum, detections in faces.items():
-            image = images[imageNum][0]
-            (h,w) = image.shape[:2]
-            index=0# number of faces detected in image
-            # loop over the detections
-            for i in range(0, detections.shape[2]):
-                # extract the confidence (i.e., probability) associated with the prediction
-                conf = detections[0, 0, i, 2]
-                # filter out weak detections by ensuring the `confidence` is greater than the minimum confidence
-                if conf > 0.7:
-                    # compute the (x, y)-coordinates of the bounding box for the object
-                    box = detections[0, 0, i, 3:7] * np.array([w, h, w, h])
+            faces = {}
+            for i in range(len(images)):
+                image = images[i][0]
+                (h,w) = image.shape[:2]
+                if h > 2000 or w > 2000:
+                    blob = cv2.dnn.blobFromImage(image, mean=(104.0, 117.0, 123.0), swapRB=True)
+                    args['confidence'] = 0.2
+                else:
+                    blob = cv2.dnn.blobFromImage(cv2.resize(image, (300, 300)), 1.0, (300, 300), (104.0, 117.0, 123.0), True)
+                    args['confidence'] = 0.2
+                net.setInput(blob)
+                detections = net.forward()
+
+                if detections.shape[2] == 0:
+                    faces[i] = np.array([[[[0., 1., 1., 0., 0., 1., 1.]]]])
+                else:
+                    faces[i] = detections
+
+            X = []# cropped portion of image from faces list
+            X_positions = []# position of crop so it can be reinserted in correct position
+            numFaces = []# number of crops made in each photo
+
+            for imageNum, detections in faces.items():
+                image = images[imageNum][0]
+                (h,w) = image.shape[:2]
+                index=0# number of faces detected in image
+                # loop over the detections
+                for i in range(0, detections.shape[2]):
+                    # extract the confidence (i.e., probability) associated with the prediction
+                    conf = detections[0, 0, i, 2]
+                    # filter out weak detections by ensuring the `confidence` is greater than the minimum confidence
+                    if conf > 0.2:
+                        # compute the (x, y)-coordinates of the bounding box for the object
+                        box = detections[0, 0, i, 3:7] * np.array([w, h, w, h])
+                        (startX, startY, endX, endY) = box.astype("int")
+                        if startX > image.shape[1]-10 or startY > image.shape[0]-10:
+                            continue
+                        w_box = endX - startX
+                        h_box = endY - startY
+                        transpose_x, transpose_y = w_box * 0.75, h_box * 0.75
+                        x_img = math.floor(startX-transpose_x) if math.floor(startX-transpose_x) >= 0 else 0
+                        y_img = math.floor(startY-transpose_y) if math.floor(startY-transpose_y) >= 0 else 0
+                        w_img = math.floor(w_box+2*transpose_x) if x_img + math.floor(w_box+2*transpose_x) <= image.shape[1] else image.shape[1] - x_img
+                        h_img = math.floor(h_box+2*transpose_y) if y_img + math.floor(h_box+2*transpose_y) <= image.shape[0] else image.shape[0] - y_img
+                        X_positions.append([x_img, y_img, w_img, h_img])
+                        # 2d array of cropped image
+                        roi_color = image[y_img:h_img+y_img, x_img:w_img+x_img]
+                        X.append(resize(roi_color, (IMG_HEIGHT, IMG_WIDTH), mode='constant', preserve_range=True))
+                        index +=1
+                if(index == 0):
+                    index = 1
+                    box = [0., 0., 1., 1.] * np.array([w, h, w, h])
                     (startX, startY, endX, endY) = box.astype("int")
-                    if startX > image.shape[1]-10 or startY > image.shape[0]-10:
-                        continue
                     w_box = endX - startX
                     h_box = endY - startY
                     transpose_x, transpose_y = w_box * 0.75, h_box * 0.75
@@ -170,40 +193,24 @@ def main():
                     # 2d array of cropped image
                     roi_color = image[y_img:h_img+y_img, x_img:w_img+x_img]
                     X.append(resize(roi_color, (IMG_HEIGHT, IMG_WIDTH), mode='constant', preserve_range=True))
-                    index +=1
-            if(index == 0):
-                index = 1
-                box = [0., 0., 1., 1.] * np.array([w, h, w, h])
-                (startX, startY, endX, endY) = box.astype("int")
-                w_box = endX - startX
-                h_box = endY - startY
-                transpose_x, transpose_y = w_box * 0.75, h_box * 0.75
-                x_img = math.floor(startX-transpose_x) if math.floor(startX-transpose_x) >= 0 else 0
-                y_img = math.floor(startY-transpose_y) if math.floor(startY-transpose_y) >= 0 else 0
-                w_img = math.floor(w_box+2*transpose_x) if x_img + math.floor(w_box+2*transpose_x) <= image.shape[1] else image.shape[1] - x_img
-                h_img = math.floor(h_box+2*transpose_y) if y_img + math.floor(h_box+2*transpose_y) <= image.shape[0] else image.shape[0] - y_img
-                X_positions.append([x_img, y_img, w_img, h_img])
-                # 2d array of cropped image
-                roi_color = image[y_img:h_img+y_img, x_img:w_img+x_img]
-                X.append(resize(roi_color, (IMG_HEIGHT, IMG_WIDTH), mode='constant', preserve_range=True))
-            numFaces.append(index)
+                numFaces.append(index)
 
-        X = np.array(X).astype(np.float32)
-        preds_test = (model.predict(X, verbose=0) > 0.8).astype(np.uint8)
-        index = 0
-        masks = []
-        for imageNum, detections in faces.items():
-            upsampled_mask = np.zeros((images[imageNum][0].shape[0], images[imageNum][0].shape[1]), dtype=np.uint8)
-            for i in range(index, index+numFaces[imageNum]):
-                coords = X_positions[i]
-                section = resize(np.squeeze(preds_test[i]), (coords[3], coords[2]), mode='constant', preserve_range=True, order=0)
-                upsampled_mask[coords[1]:coords[3]+coords[1], coords[0]:coords[2]+coords[0]] += section.astype(np.uint8)
-            masks.append(upsampled_mask)
-            index += numFaces[imageNum]
-            plt.imsave(os.path.abspath(os.path.join(filePath, '..', '..', '..', 'temp', 'maskImages', os.path.basename(file_names[imageNum]))), upsampled_mask, cmap=cm.gray)
+            X = np.array(X).astype(np.float32)
+            preds_test = (model.predict(X, verbose=0) > 0.8).astype(np.uint8)
+            index = 0
+            masks = []
+            for imageNum, detections in faces.items():
+                upsampled_mask = np.zeros((images[imageNum][0].shape[0], images[imageNum][0].shape[1]), dtype=np.uint8)
+                for i in range(index, index+numFaces[imageNum]):
+                    coords = X_positions[i]
+                    section = resize(np.squeeze(preds_test[i]), (coords[3], coords[2]), mode='constant', preserve_range=True, order=0)
+                    upsampled_mask[coords[1]:coords[3]+coords[1], coords[0]:coords[2]+coords[0]] += section.astype(np.uint8)
+                masks.append(upsampled_mask)
+                index += numFaces[imageNum]
+                plt.imsave(os.path.abspath(os.path.join(filePath, '..', '..', '..', 'temp', 'maskImages', os.path.basename(file_names[imageNum]))), upsampled_mask, cmap=cm.gray)
 
-        # np.set_printoptions(threshold=np.inf)
-        # print(np.array2string(np.array(masks), separator=', '))
+            # np.set_printoptions(threshold=np.inf)
+            # print(np.array2string(np.array(masks), separator=', '))
 
 if __name__ == "__main__":
     main()

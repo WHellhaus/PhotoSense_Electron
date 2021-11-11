@@ -99,7 +99,7 @@ function Canvas({ image = new Image(), coordsPass = [[]], setCoordsPass }) {
     const canvasObj = canvasRef.current;
     const ctx = canvasObj.getContext('2d');
     let imageData = ctx.getImageData(0, 0, width, height);
-    let copy = [...coordinates];
+    let copy = [...coordsPass];
     for (let x = 0; x < height; x++) {
       for (let y = 0; y < width; y++) {
         // 4 bytes for each channel color and need the 4th channel (alpha) to compute

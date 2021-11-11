@@ -75,7 +75,7 @@ function Alert(props) {
   return <MuiAlert elevation={6} variant="filled" {...props} />;
 }
 
-function CanvasPagination({ imagePaths, imageMasks, resizedImages }) {
+function CanvasPagination({ imagePaths, imageMasks, resizedImages, tempFolder }) {
   const classes = useStyles();
   const theme = useTheme();
   const history = useHistory();
@@ -86,14 +86,12 @@ function CanvasPagination({ imagePaths, imageMasks, resizedImages }) {
   const [isCensoring, setIsCensoring] = useState(false);
   const [censoredImages, setCensoredImages] = useState([]);
   const [imageBlobs, setImageBlobs] =  useState([]);
-  const fullScreen = useMediaQuery(theme.breakpoints.down('sm'));
+  const fullScreen = useMediaQuery(theme.breakpoints.down('sm'));// check if on small browser window for zoom out
   const [alertOpen, setAlert] = useState(false);
 
-  // this holds all metadata tags for all images
-  const [allMeta, setAllMeta] = useState([]);
-  // this holds the censorship options in an array
-  const [censorOptions, setCensOptions] = useState([]);
-
+  /*
+    FUNCTION FOR ZOOMING OUT ON MOBILE BROWSERS
+  */
   function zoomOutMobile() {
     var viewport = document.querySelector('meta[name="viewport"]');
     if ( viewport ) {
@@ -104,11 +102,70 @@ function CanvasPagination({ imagePaths, imageMasks, resizedImages }) {
   if(fullScreen) {
     zoomOutMobile();
   }
-  
+
+  /*
+    PRE PROCESSING OF IMAGE TO GATHER METADATA FOR VISULAIZATIONS BEFORE SCRUBBING
+  */
+  // this holds all metadata tags for all images
+  const [allMeta, setAllMeta] = useState([]);
+  // this holds the censorship options in an array
+  const [censorOptions, setCensOptions] = useState([]);
+
+  // Sets up censorship options with defaults for each image
+  useEffect(async () => {
+    /**Populate allMeta with allTag dictionary for each image */
+    let exifs = [];// exif data from images
+    let defaultOptions =
+    {
+      'pixelization': false,
+      'gaussian': true,
+      'pixel_sort': true,
+      'fill_in': false,
+      'black_bar': false,
+      'metaDataTags': []
+    };
+    // substrings to check for metadata tags with sensitive information
+    let defaultMetadataSubstrings = ["make", "model", "gps", "maker", "note", "location", "name",
+      "date", "datetime", "description", "software", "device",
+      "longitude", "latitude", "altitude"];
+    let censOptCopy = [...censorOptions];
+
+    console.log(imagePaths);
+
+    imagePaths.forEach((image, index) => {
+      console.log(image);
+      let imagePath = 'file:///'+tempFolder+'/uploadedImages/'+image;
+      exifs.push(getMetadataTags(imagePath));// using getMetadataTags utility function (inside utils.js file)
+
+      /**Populate censorOptions state variable with default options for each image*/
+      if (index < censOptCopy.length) {
+        censOptCopy[index] = JSON.parse(JSON.stringify(defaultOptions));
+      } else {
+        censOptCopy.push(JSON.parse(JSON.stringify(defaultOptions)));
+      }
+    });
+    exifs = await Promise.all(exifs);
+    setAllMeta(exifs);
+    exifs.forEach((exif, index) => {
+      console.log(exif)
+      for (const [key, value] of Object.entries(exif)) {
+        if (new RegExp(defaultMetadataSubstrings.join("|")).test(key.toLowerCase())) {
+          // At least one match
+          if (censOptCopy[index]['metaDataTags'].indexOf(key) < 0) {
+            censOptCopy[index]['metaDataTags'].push(key);
+          }
+        }
+      }
+    });
+    setCensOptions(censOptCopy);
+  }, [resizedImages]);
+
+  /*
+    HANDLING CHANGES OF PAGES
+  */
   const handlePagination = (event, value) => {
     setPage(value);
   };
-
   const handleCoordsChange = (coords) => {
     let newCoords = coordsPass;
     newCoords[page - 1] = coords;
@@ -197,49 +254,6 @@ function CanvasPagination({ imagePaths, imageMasks, resizedImages }) {
     setAlert(false);
   };
 
-  // sets up censorship options with defaults for each image
-  // useEffect(async () => {
-  //   /**Populate allMeta with allTag dictionary for each image */
-  //   let exifs = [];
-  //   let defaultOptions =
-  //   {
-  //     'pixelization': false,
-  //     'gaussian': true,
-  //     'pixel_sort': true,
-  //     'fill_in': false,
-  //     'black_bar': false,
-  //     'metaDataTags': []
-  //   };
-  //   let defaultMetadataSubstrings = ["make", "model", "gps", "maker", "note", "location", "name",
-  //     "date", "datetime", "description", "software", "device",
-  //     "longitude", "latitude", "altitude"];
-  //   let censOptCopy = [...censorOptions];
-  //   images.forEach((image, index) => {
-  //     exifs.push(getMetadataTags(image));
-
-  //     /**Populate censorOptions state variable with default options for each image*/
-  //     if (index < censOptCopy.length) {
-  //       censOptCopy[index] = JSON.parse(JSON.stringify(defaultOptions));
-  //     } else {
-  //       censOptCopy.push(JSON.parse(JSON.stringify(defaultOptions)));
-  //     }
-  //   });
-  //   exifs = await Promise.all(exifs);
-  //   setAllMeta(exifs);
-  //   exifs.forEach((exif, index) => {
-  //     for (const [key, value] of Object.entries(exif)) {
-  //       if (new RegExp(defaultMetadataSubstrings.join("|")).test(key.toLowerCase())) {
-  //         // At least one match
-  //         if (censOptCopy[index]['metaDataTags'].indexOf(key) < 0) {
-  //           censOptCopy[index]['metaDataTags'].push(key);
-  //         }
-  //       }
-  //     }
-  //   });
-  //   setCensOptions(censOptCopy);
-  //   //unfinished
-  // }, [images]);
-
   // const ImageComponent = ({img}) => { <img src={img.src} alt="censored image" />}
 
 
@@ -281,13 +295,13 @@ function CanvasPagination({ imagePaths, imageMasks, resizedImages }) {
             : 
             <Paper style={{width: '100%', height: '100%', marginTop: 15, padding: 15}}>
             <Grid item xs={12}>
-              {/* <CensorshipOptionsDialog
+              <CensorshipOptionsDialog
                 censorOptions={censorOptions}
                 setCensorOpt={setCensOptions}
                 pagenum={page}
                 metadata={allMeta}
                 setPage={handlePagination}
-              /> */}
+              />
               <Button size='small' className={classes.censorButton} >
                 Censor
                 </Button>

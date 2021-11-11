@@ -1,4 +1,4 @@
-import React, {useState} from "react";
+import React, {useEffect, useState} from "react";
 // import ROUTES from "Constants/routes";
 // import { Link } from "react-router-dom";
 import { makeStyles } from '@material-ui/core/styles';
@@ -7,7 +7,7 @@ import Dropzone from 'react-dropzone';
 import Snackbar from '@material-ui/core/Snackbar';
 import MuiAlert from '@material-ui/lab/Alert';
 import CanvasPagination from '../../components/Canvas/CanvasPagination.jsx';
-import { resizeImage, getImageMask } from '../../utils/utils.js';
+import { resizeImage, getImageMask, getMetadataTags } from '../../utils/utils.js';
 
 const useStyles = makeStyles((theme) => ({
   root: {
@@ -139,7 +139,7 @@ function Welcome()  {
       case 2:
         return (
           <div>
-            <CanvasPagination images={imageNames} imageMasks={imageMasks} resizedImages={resizedImages}/>
+            <CanvasPagination imagePaths={imageNames} imageMasks={imageMasks} resizedImages={resizedImages} tempFolder={tempFolder}/>
           </div>
         );
     }
