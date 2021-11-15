@@ -127,9 +127,15 @@ async function createWindow() {
     await clearDirectory(path.join(__dirname, '../temp/maskImages/'));
     await clearDirectory(path.join(__dirname, '../temp/censoredImages/'));
 
+    /*
+      CHECKS IF SEGMENTATION PROCESS IS ALREADY ALIVE BEFORE SPAWNING A NEW ONE
+    */
     // startup segmentation process after windows has loaded
     // this process will be run throughout the duration of the apps life
-    segmentationProcess =  await StartSegProcess();
+    if (segmentationProcess == null || !checkIsAlive(segmentationProcess.pid)) {
+      segmentationProcess =  await StartSegProcess();
+    }
+    
     //console.log(segmentationProcess);
   });
 
@@ -217,7 +223,10 @@ protocol.registerSchemesAsPrivileged([{
 // Some APIs can only be used after this event occurs.
 app.on("ready", createWindow);
 
-// IPC functions
+/* 
+  IPC FUNCTIONS 
+*/
+// Receives file paths from renderer process and returns after all images have been segmented
 ipcMain.handle('filePath', async (event, args) => {
   console.log(`Received ${args} from renderer process`);
   var file_names = [];
@@ -250,6 +259,19 @@ ipcMain.handle('filePath', async (event, args) => {
       return {'temp_path': path.join(__dirname, `../temp/`), 'file_names': segmented_files};
     }
   });
+});
+
+// Receives censor options for each image and svaes them to JSON file for censor process to read
+ipcMain.handle('censorOptions', async (event, args) => {
+  console.log(`Received ${args} from renderer process`);
+
+  fs.writeFile(path.join(__dirname, '../python/censor_code/censor_options.json'), JSON.stringify(args), (error) => {
+    if(error)
+      console.log(error);
+    else 
+      console.log('succesfully wrote censor options file');
+  });
+  return 'good job';
 });
 
 // Check that uploaded image has been segmented
@@ -288,9 +310,35 @@ function StartSegProcess() {
       `${path.join(__dirname, '../python/segmentation_code/detect_segment.py')}`
     ]);
 
-    console.log(`python process started: ${python}`);
+    python.stdout.on("data", function (data) {
+      console.log(`stderr: ${data}`);
+    // Do some process here
+    });
+
+    python.stderr.on("data", (data) => {
+        console.error(`stderr: ${data}`);
+        console.log(`stderr: ${data}`);
+    });
+
+    python.on("close", (code) => {
+        console.log(`child process exited with code ${code}`);
+    });
+  
+    console.log(`python process started: ${python.pid}`);
     resolve(python);
   });
+}
+
+// Check if process with PID is running
+function checkIsAlive(pid) {
+  try {
+    process.kill(pid, 0);// throws error if target PID doesn't exist. kill signal of 0 doesn't terminate process
+    console.log(`killed process, ${pid}`)
+    return true;
+  } catch(exception) {
+    console.log(exception);
+    return false;
+  }
 }
 
 // Delete files from directory
@@ -320,7 +368,12 @@ var uint8arrayToString = function(data){
 };
 
 // Quit when all windows are closed.
-app.on("window-all-closed", () => {
+app.on("window-all-closed", async() => {
+  // clear temp directories
+  await clearDirectory(path.join(__dirname, '../temp/uploadedImages/'));
+  await clearDirectory(path.join(__dirname, '../temp/maskImages/'));
+  await clearDirectory(path.join(__dirname, '../temp/censoredImages/'));
+
   // On macOS it is common for applications and their menu bar
   // to stay active until the user quits explicitly with Cmd + Q
   if (process.platform !== "darwin") {

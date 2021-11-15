@@ -117,9 +117,10 @@ function CanvasPagination({ imagePaths, imageMasks, resizedImages, tempFolder })
     let exifs = [];// exif data from images
     let defaultOptions =
     {
-      'pixelization': false,
+      'image_name': '',
       'gaussian': true,
       'pixel_sort': true,
+      'pixelization': false,
       'fill_in': false,
       'black_bar': false,
       'metaDataTags': []
@@ -130,19 +131,17 @@ function CanvasPagination({ imagePaths, imageMasks, resizedImages, tempFolder })
       "longitude", "latitude", "altitude"];
     let censOptCopy = [...censorOptions];
 
-    console.log(imagePaths);
-
     imagePaths.forEach((image, index) => {
       console.log(image);
       let imagePath = 'file:///'+tempFolder+'/uploadedImages/'+image;
       exifs.push(getMetadataTags(imagePath));// using getMetadataTags utility function (inside utils.js file)
-
-      /**Populate censorOptions state variable with default options for each image*/
+      //Populate censorOptions state variable with default options for each image
       if (index < censOptCopy.length) {
         censOptCopy[index] = JSON.parse(JSON.stringify(defaultOptions));
       } else {
         censOptCopy.push(JSON.parse(JSON.stringify(defaultOptions)));
       }
+      censOptCopy[index]['image_name'] = image;
     });
     exifs = await Promise.all(exifs);
     setAllMeta(exifs);
@@ -170,6 +169,10 @@ function CanvasPagination({ imagePaths, imageMasks, resizedImages, tempFolder })
     let newCoords = coordsPass;
     newCoords[page - 1] = coords;
     setCoordsPass(newCoords);
+  }
+
+  const censorImages = async() => {
+    window.api.send('censorOptions', censorOptions);
   }
 
   // const censorImages = async () => {
@@ -302,7 +305,7 @@ function CanvasPagination({ imagePaths, imageMasks, resizedImages, tempFolder })
                 metadata={allMeta}
                 setPage={handlePagination}
               />
-              <Button size='small' className={classes.censorButton} >
+              <Button size='small' className={classes.censorButton} onClick={censorImages}>
                 Censor
                 </Button>
               <Canvas

@@ -3,7 +3,7 @@ import sys
 import math
 import pathlib
 import uuid
-
+import time
 import cv2
 import numpy as np
 from PIL import Image
@@ -28,7 +28,7 @@ IMG_CHANNELS = 3
 args = {'prototxt': 'deploy.prototxt.txt', 'model': 'res10_300x300_ssd_iter_140000.caffemodel', 'confidence': 0.7}
 filePath = pathlib.Path(__file__).resolve()
 
-segmentedImages = set() # holds all images that have already been segmented by model
+# segmentedImages = set() # holds all images that have already been segmented by model
 
 def conv2d_block(input_tensor, n_filters, kernel_size = 3, batchnorm = True):
     """Function to add 2 convolutional layers with the parameters passed to it"""
@@ -108,18 +108,27 @@ def load_models():
     return model, net
 
 def main():
+    model, net = load_models()
+
     while True:
-        model, net = load_models()
         
         imageFolderPath = os.path.join(filePath, '..', '..', '..', 'temp', 'uploadedImages')
-        file_names = [os.path.abspath(os.path.join(imageFolderPath, f)) for f in os.listdir(os.path.abspath(imageFolderPath)) if f.endswith(('.jpeg', '.jpg', '.png'))]
+        file_names = [os.path.basename(f) for f in os.listdir(os.path.abspath(imageFolderPath)) if f.endswith(('.jpeg', '.jpg', '.png'))]
 
-        file_names = list(set(file_names) - segmentedImages)
-        segmentedImages.update(file_names)
+        # Checks file names in temp mask folder to not segment them twice
+        maskFolderPath = os.path.join(filePath, '..', '..', '..', 'temp', 'maskImages')
+        segmentedImages = [os.path.basename(f) for f in os.listdir(os.path.abspath(maskFolderPath)) if f.endswith(('.jpeg', '.jpg', '.png'))]
+
+        # Finds differenced between already segmented images set and uploaded images set
+        file_names = list(set(file_names) - set(segmentedImages))
+
+        # Formats each image file name to have the full path
+        # file_names = [os.path.abspath(os.path.join(imageFolderPath, f)) for f in file_names]
+        # segmentedImages.update(file_names)
 
         images = []
         for file in file_names:
-            image = Image.open(file)
+            image = Image.open(os.path.abspath(os.path.join(imageFolderPath, file)))
             # if the image mode is not RGB, convert it
             if image.mode != "RGB":
                 image = image.convert("RGB")
@@ -211,6 +220,9 @@ def main():
 
             # np.set_printoptions(threshold=np.inf)
             # print(np.array2string(np.array(masks), separator=', '))
+            
+        # sleep for a small amount
+        time.sleep(0.25)
 
 if __name__ == "__main__":
     main()

@@ -17,7 +17,7 @@ contextBridge.exposeInMainWorld("api", {
   licenseKeys: SecureElectronLicenseKeys.preloadBindings(ipcRenderer),
   send: async (channel, data) => {
     // whitelist channels here
-    let validChannels = ["filePath"];
+    let validChannels = ["filePath", "censorOptions"];
     if (validChannels.includes(channel)) {
       return await ipcRenderer.invoke(channel, data);
     }
